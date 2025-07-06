@@ -19,7 +19,7 @@ This repository contains the firmware and source code for an advanced omniwheels
 - **Rotary Encoder Interface** for manual mode selection and control
 - **Dual TB6612FNG Motor Drivers** for precise motor control
 - **Watchdog Timer** for system reliability and fault recovery
-- **EEPROM Emulation** for persistent settings storage
+- **EEPROM Emulation** for persistent settings storage and recovery
 
 ### Software Features
 - **FreeRTOS** real-time operating system with mutex protection
@@ -68,8 +68,8 @@ This repository contains the firmware and source code for an advanced omniwheels
   For communication and sensor fusion data from the BNO085 IMU (via I2C, using SH2 protocol).
 - **TB6612FNG Motor Driver Library:**  
   For controlling dual H-bridge motor drivers.
-- **EEPROM Emulation Library:**  
-  For persistent storage of heading lock and settings in STM32 flash.
+- **EEPROM Emulation Library (I-CUBE-EE):**  
+  For persistent storage of heading lock and other key data in STM32 flash.
 - **Custom SBUS Decoder:**  
   For parsing SBUS frames from the RC receiver using DMA and error recovery.
 
@@ -106,6 +106,16 @@ The robot uses a PID controller to maintain heading during movement (heading loc
 - **Watchdog Timeout:** ~5 seconds (adjustable in `MX_IWDG_Init`)
 - **Encoder Polling:** 50 Hz (`osDelay(20)` in EncoderTask)
 - **Display Update:** 5 Hz (`osDelay(200)` in DisplayTask)
+
+---
+
+## EEPROM Usage and Recovery
+
+The firmware uses EEPROM emulation (via the I-CUBE-EE library) to **save key data for recovery**, including:
+- **Heading lock value:** The last locked heading is saved so it can be restored after a power cycle or SBUS signal loss.
+- **Other persistent settings:** Any additional configuration or calibration data can be stored for robust operation.
+
+This ensures the robot can recover its heading lock and other critical parameters after resets, power loss, or communication failures.
 
 ---
 
@@ -234,6 +244,7 @@ The robot uses a PID controller to maintain heading during movement (heading loc
 ├── Core/           # Main application source code (Src/Inc)
 ├── Drivers/        # HAL and device drivers
 ├── FreeRTOS/       # RTOS configuration and source
+├── I-CUBE-EE/      # EEPROM emulation library (I-CUBE-EE)
 ├── .ioc            # STM32CubeMX project file
 ├── README.md
 └── ...
@@ -267,7 +278,7 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 
 - [STMicroelectronics](https://www.st.com/)
 - [STM32CubeIDE](https://www.st.com/en/development-tools/stm32cubeide.html)
-- Open-source libraries and contributors for SSD1306, BNO085, and FreeRTOS support
+- Open-source libraries and contributors for SSD1306, BNO085, FreeRTOS, and I-CUBE-EE support
 
 ---
 
