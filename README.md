@@ -18,6 +18,7 @@ This repository contains the firmware and source code for an advanced omniwheels
 - **BNO085 IMU Sensor** for 9-DOF motion sensing and compass heading
 - **Rotary Encoder Interface** for manual mode selection and control
 - **Dual TB6612FNG Motor Drivers** for precise motor control
+- **FrSky R-XSR Receiver with SBUS Inverter** for reliable SBUS RC signal input
 - **Watchdog Timer** for system reliability and fault recovery
 - **EEPROM Emulation** for persistent settings storage and recovery
 
