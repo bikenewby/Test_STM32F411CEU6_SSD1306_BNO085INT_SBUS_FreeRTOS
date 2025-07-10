@@ -20,7 +20,7 @@ This repository contains the firmware and source code for an advanced omniwheels
 - **Dual TB6612FNG Motor Drivers** for precise motor control
 - **FrSky R-XSR Receiver with SBUS Inverter** for reliable SBUS RC signal input
 - **Watchdog Timer** for system reliability and fault recovery
-- **EEPROM Emulation** for persistent settings storage and recovery
+- **MB85RC256V FRAM** for persistent settings storage and recovery
 
 ### Software Features
 - **FreeRTOS** real-time operating system with mutex protection
@@ -69,8 +69,8 @@ This repository contains the firmware and source code for an advanced omniwheels
   For communication and sensor fusion data from the BNO085 IMU (via I2C, using SH2 protocol).
 - **TB6612FNG Motor Driver Library:**  
   For controlling dual H-bridge motor drivers.
-- **EEPROM Emulation Library (I-CUBE-EE):**  
-  For persistent storage of heading lock and other key data in STM32 flash.
+- **MB85RC256V FRAM Library:**  
+  For persistent storage of heading lock and other key data via I2C.
 - **Custom SBUS Decoder:**  
   For parsing SBUS frames from the RC receiver using DMA and error recovery.
 
@@ -110,9 +110,9 @@ The robot uses a PID controller to maintain heading during movement (heading loc
 
 ---
 
-## EEPROM Usage and Recovery
+## FRAM Storage and Recovery
 
-The firmware uses EEPROM emulation (via the I-CUBE-EE library) to **save key data for recovery**, including:
+The firmware uses MB85RC256V FRAM (via I2C1) to **save key data for recovery**, including:
 - **Heading lock value:** The last locked heading is saved so it can be restored after a power cycle or SBUS signal loss.
 - **Other persistent settings:** Any additional configuration or calibration data can be stored for robust operation.
 
@@ -126,8 +126,8 @@ This ensures the robot can recover its heading lock and other critical parameter
 |------------------------|-----------|---------------|---------------------------------|
 | **Communication**      |           |               |                                 |
 | SBUS RX (inverted)     | PA3       | USART2_RX     | Requires signal inverter        |
-| I2C1 SCL               | PB6       | I2C1_SCL      | SSD1306 + BNO085                |
-| I2C1 SDA               | PB7       | I2C1_SDA      | SSD1306 + BNO085                |
+| I2C1 SCL               | PB6       | I2C1_SCL      | SSD1306 + BNO085 + MB85RC256V  |
+| I2C1 SDA               | PB7       | I2C1_SDA      | SSD1306 + BNO085 + MB85RC256V  |
 | BNO085 INT             | PA8       | EXTI8         | Interrupt for sensor data       |
 | **Motor Control**      |           |               |                                 |
 | Motor 1A PWM           | PA8       | TIM1_CH1      | Right Front Motor               |
@@ -189,7 +189,7 @@ This ensures the robot can recover its heading lock and other critical parameter
 - **Features**:
   - PID-controlled heading lock system
   - Automatic oscillation and overshoot detection
-  - Persistent heading storage in EEPROM
+  - Persistent heading storage in FRAM
   - Signal recovery with heading restoration
 - **States**: IDLE (stopped) or RUNNING (active with heading lock)
 
@@ -208,7 +208,7 @@ This ensures the robot can recover its heading lock and other critical parameter
 1. **Startup**
    - Initialize peripherals, drivers, and FreeRTOS.
    - Scan I2C bus and check BNO085 presence.
-   - Initialize OLED, EEPROM, and watchdog.
+   - Initialize OLED, FRAM, and watchdog.
 
 2. **SBUS Handling**
    - Receive SBUS frames via DMA.
@@ -224,7 +224,7 @@ This ensures the robot can recover its heading lock and other critical parameter
    - When enabled, calculates heading error and applies PID correction to motor speeds.
    - Adaptive PID gains, anti-windup, and rate limiting.
    - Oscillation and overshoot detection adjust gains dynamically.
-   - Heading lock state is saved/restored to/from EEPROM for robustness.
+   - Heading lock state is saved/restored to/from FRAM for robustness.
 
 5. **Safety & Recovery**
    - Immediate motor stop on SBUS loss or error.
@@ -245,7 +245,7 @@ This ensures the robot can recover its heading lock and other critical parameter
 ├── Core/           # Main application source code (Src/Inc)
 ├── Drivers/        # HAL and device drivers
 ├── FreeRTOS/       # RTOS configuration and source
-├── I-CUBE-EE/      # EEPROM emulation library (I-CUBE-EE)
+├── Middlewares/    # Third-party libraries and middleware
 ├── .ioc            # STM32CubeMX project file
 ├── README.md
 └── ...
@@ -279,7 +279,7 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 
 - [STMicroelectronics](https://www.st.com/)
 - [STM32CubeIDE](https://www.st.com/en/development-tools/stm32cubeide.html)
-- Open-source libraries and contributors for SSD1306, BNO085, FreeRTOS, and I-CUBE-EE support
+- Open-source libraries and contributors for SSD1306, BNO085, FreeRTOS, and MB85RC256V support
 
 ---
 
