@@ -1,0 +1,5 @@
+../Core/Src/tb6612fng.c:19:6:TB6612FNG_Init	2
+../Core/Src/tb6612fng.c:30:6:TB6612FNG_Set	10
+../Core/Src/tb6612fng.c:59:6:tb6612fng_drive	2
+../Core/Src/tb6612fng.c:64:6:tb6612fng_stop	2
+../Core/Src/tb6612fng.c:69:6:tb6612fng_brake	2

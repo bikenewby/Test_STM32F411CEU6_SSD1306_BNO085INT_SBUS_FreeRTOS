@@ -1,0 +1,5 @@
+../Core/Src/mb85rc256v.c:16:6:MB85rc_Init	16	static
+../Core/Src/mb85rc256v.c:28:19:MB85rc_Bus_Write	48	static
+../Core/Src/mb85rc256v.c:45:19:MB85rc_Bus_Read	48	static
+../Core/Src/mb85rc256v.c:61:19:MB85rc_ReadByte	24	static
+../Core/Src/mb85rc256v.c:77:19:MB85rc_WriteByte	24	static
