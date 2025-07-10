@@ -1,5 +1,0 @@
-../Core/Src/tb6612fng.c:19:6:TB6612FNG_Init	16	static
-../Core/Src/tb6612fng.c:30:6:TB6612FNG_Set	24	static
-../Core/Src/tb6612fng.c:59:6:tb6612fng_drive	16	static
-../Core/Src/tb6612fng.c:64:6:tb6612fng_stop	16	static
-../Core/Src/tb6612fng.c:69:6:tb6612fng_brake	16	static

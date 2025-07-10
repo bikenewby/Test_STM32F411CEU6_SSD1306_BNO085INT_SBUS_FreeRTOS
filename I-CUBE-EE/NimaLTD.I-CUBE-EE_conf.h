@@ -35,7 +35,7 @@
 
 /**
   MiddleWare name : NimaLTD.I-CUBE-EE.3.2.2
-  MiddleWare fileName : NimaLTD.I-CUBE-EE_conf.h
+  MiddleWare fileName : ./NimaLTD.I-CUBE-EE_conf.h
 */
 /*---------- EE_MANUAL_CONFIG  -----------*/
 #define EE_MANUAL_CONFIG      true

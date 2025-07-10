@@ -1,5 +1,0 @@
-../Core/Src/sh2/sh2_platform_impl.c:10:5:sh2_hal_open	1
-../Core/Src/sh2/sh2_platform_impl.c:11:6:sh2_hal_close	1
-../Core/Src/sh2/sh2_platform_impl.c:13:5:sh2_hal_read	3
-../Core/Src/sh2/sh2_platform_impl.c:25:5:sh2_hal_write	2
-../Core/Src/sh2/sh2_platform_impl.c:34:10:sh2_hal_getTimeUs	1
