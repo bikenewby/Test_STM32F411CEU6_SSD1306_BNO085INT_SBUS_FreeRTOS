@@ -79,6 +79,8 @@ void Error_Handler(void);
 #define Motor_2A_IN1_GPIO_Port GPIOB
 #define Motor_2A_IN2_Pin GPIO_PIN_1
 #define Motor_2A_IN2_GPIO_Port GPIOB
+#define Motor_1B_IN2_Pin GPIO_PIN_10
+#define Motor_1B_IN2_GPIO_Port GPIOB
 #define TB6612__1_STBY_Pin GPIO_PIN_12
 #define TB6612__1_STBY_GPIO_Port GPIOB
 #define TB6612__2_STBY_Pin GPIO_PIN_13
@@ -93,8 +95,6 @@ void Error_Handler(void);
 #define Motor_1B_PWM_GPIO_Port GPIOA
 #define Motor_2A_PWM_Pin GPIO_PIN_11
 #define Motor_2A_PWM_GPIO_Port GPIOA
-#define Motor_1B_IN2_Pin GPIO_PIN_15
-#define Motor_1B_IN2_GPIO_Port GPIOA
 #define Motor_1B_IN1_Pin GPIO_PIN_5
 #define Motor_1B_IN1_GPIO_Port GPIOB
 #define INT_for_BNO085_Pin GPIO_PIN_8

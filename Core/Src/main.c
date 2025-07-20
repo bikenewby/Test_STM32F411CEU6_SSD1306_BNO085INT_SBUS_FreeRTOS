@@ -26,6 +26,7 @@
 #include "fonts.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <math.h>
 #include "sh2/sh2.h"
 #include "sh2/sh2_SensorValue.h"
@@ -82,43 +83,68 @@ IWDG_HandleTypeDef hiwdg;
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim3;
 
+UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 DMA_HandleTypeDef hdma_usart2_rx;
 
 /* Definitions for defaultTask */
 osThreadId_t defaultTaskHandle;
-const osThreadAttr_t defaultTask_attributes = { .name = "defaultTask",
-		.stack_size = 128 * 4, .priority = (osPriority_t) osPriorityNormal, };
+const osThreadAttr_t defaultTask_attributes = {
+		.name = "defaultTask",
+		.stack_size = 128 * 4,
+		.priority = (osPriority_t) osPriorityNormal,
+};
 /* Definitions for CompassTask */
 osThreadId_t CompassTaskHandle;
-const osThreadAttr_t CompassTask_attributes = { .name = "CompassTask",
-		.stack_size = 256 * 4, .priority = (osPriority_t) osPriorityNormal, };
+const osThreadAttr_t CompassTask_attributes = {
+		.name = "CompassTask",
+		.stack_size = 256 * 4,
+		.priority = (osPriority_t) osPriorityNormal,
+};
 /* Definitions for DisplayTask */
 osThreadId_t DisplayTaskHandle;
-const osThreadAttr_t DisplayTask_attributes = { .name = "DisplayTask",
-		.stack_size = 256 * 4, .priority = (osPriority_t) osPriorityLow, };
+const osThreadAttr_t DisplayTask_attributes = {
+		.name = "DisplayTask",
+		.stack_size = 256 * 4,
+		.priority = (osPriority_t) osPriorityLow,
+};
 /* Definitions for EncoderTask */
 osThreadId_t EncoderTaskHandle;
-const osThreadAttr_t EncoderTask_attributes = { .name = "EncoderTask",
-		.stack_size = 128 * 4, .priority = (osPriority_t) osPriorityNormal, };
+const osThreadAttr_t EncoderTask_attributes = {
+		.name = "EncoderTask",
+		.stack_size = 128 * 4,
+		.priority = (osPriority_t) osPriorityNormal,
+};
 /* Definitions for CompassMutex */
 osMutexId_t CompassMutexHandle;
-const osMutexAttr_t CompassMutex_attributes = { .name = "CompassMutex" };
+const osMutexAttr_t CompassMutex_attributes = {
+		.name = "CompassMutex"
+};
 /* Definitions for I2C1Mutex */
 osMutexId_t I2C1MutexHandle;
-const osMutexAttr_t I2C1Mutex_attributes = { .name = "I2C1Mutex" };
+const osMutexAttr_t I2C1Mutex_attributes = {
+		.name = "I2C1Mutex"
+};
 /* Definitions for EncoderMutex */
 osMutexId_t EncoderMutexHandle;
-const osMutexAttr_t EncoderMutex_attributes = { .name = "EncoderMutex" };
+const osMutexAttr_t EncoderMutex_attributes = {
+		.name = "EncoderMutex"
+};
 /* Definitions for UARTMutex */
 osMutexId_t UARTMutexHandle;
-const osMutexAttr_t UARTMutex_attributes = { .name = "UARTMutex" };
+const osMutexAttr_t UARTMutex_attributes = {
+		.name = "UARTMutex"
+};
 /* Definitions for ModeMutex */
 osMutexId_t ModeMutexHandle;
-const osMutexAttr_t ModeMutex_attributes = { .name = "ModeMutex" };
+const osMutexAttr_t ModeMutex_attributes = {
+		.name = "ModeMutex"
+};
 /* Definitions for EEPROMMutex */
 osMutexId_t EEPROMMutexHandle;
-const osMutexAttr_t EEPROMMutex_attributes = { .name = "EEPROMMutex" };
+const osMutexAttr_t EEPROMMutex_attributes = {
+		.name = "EEPROMMutex"
+};
 /* USER CODE BEGIN PV */
 // USART
 uint8_t sbus_rx_buffer[SBUS_FRAME_SIZE];
@@ -201,7 +227,7 @@ typedef struct {
 	uint8_t heading_lock_was_active; // Was heading lock active when saved
 } eeStorage_t;
 
-eeStorage_t eeStorage = { 0.0f, 0 }; // Initialize storage with default values
+eeStorage_t eeStorage = { 0, 0.0f, 0 }; // magic_number, saved_locked_heading, heading_lock_was_active
 
 #define EE_MAGIC_NUMBER 0x48454144  // "HEAD" in hex
 
@@ -219,6 +245,7 @@ static void MX_USART2_UART_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_IWDG_Init(void);
+static void MX_USART1_UART_Init(void);
 void StartDefaultTask(void *argument);
 void StartCompassTask(void *argument);
 void StartDisplayTask(void *argument);
@@ -240,6 +267,23 @@ void save_heading_lock_to_eeprom(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+// Printf redirection for USART1
+int _write(int file, char *ptr, int len) {
+	HAL_UART_Transmit(&huart1, (uint8_t*)ptr, len, 1000);
+	return len;
+}
+
+// Alternative function for direct debug printing
+void debug_print(const char* format, ...) {
+	char buffer[256];
+	va_list args;
+	va_start(args, format);
+	vsnprintf(buffer, sizeof(buffer), format, args);
+	va_end(args);
+	HAL_UART_Transmit(&huart1, (uint8_t*)buffer, strlen(buffer), 1000);
+}
+
 // Modified I2C bus scanner: stores found addresses in a string buffer
 void i2c_bus_scan(char *found_devices, size_t bufsize) {
 	char addr_str[8];
@@ -745,10 +789,33 @@ void save_heading_lock_to_eeprom(void) {
 		eeStorage.magic_number = EE_MAGIC_NUMBER;
 		eeStorage.saved_locked_heading = locked_heading;
 		eeStorage.heading_lock_was_active = 1;
-		if (MB85rc_Bus_Write(MB85rc_ADDRESS, 0x0000, (uint8_t*) &eeStorage,
-				sizeof(eeStorage_t)) != HAL_OK) {
-			// Handle error
-			Error_Handler();
+		
+		HAL_StatusTypeDef status = MB85rc_Bus_Write(MB85rc_ADDRESS, 0x0000, 
+				(uint8_t*) &eeStorage, sizeof(eeStorage_t));
+		
+		if (status != HAL_OK) {
+			// Turn ON LED to indicate error
+			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+			
+			// Log error but don't crash the system
+			printf("FRAM Write Error: 0x%02X at tick %lu\r\n", status, HAL_GetTick());
+			
+			// Try recovery: reinitialize I2C
+			HAL_I2C_DeInit(&hi2c1);
+			HAL_Delay(10);
+			MX_I2C1_Init();
+			
+			// Optional: Try one more time
+			status = MB85rc_Bus_Write(MB85rc_ADDRESS, 0x0000, 
+					(uint8_t*) &eeStorage, sizeof(eeStorage_t));
+			if (status != HAL_OK) {
+				printf("FRAM Write Failed Again - Continuing without save\r\n");
+				// Keep LED ON to indicate persistent error
+			} else {
+				printf("FRAM Write Recovered Successfully\r\n");
+				// Turn OFF LED after successful recovery
+				HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+			}
 		}
 		osMutexRelease(I2C1MutexHandle);
 	}
@@ -757,16 +824,45 @@ void save_heading_lock_to_eeprom(void) {
 bool restore_heading_lock_from_eeprom(void) {
 	bool result = false;
 	osMutexAcquire(I2C1MutexHandle, osWaitForever);
-	if (MB85rc_Bus_Read(MB85rc_ADDRESS, 0x0000, (uint8_t*) &eeStorage,
-			sizeof(eeStorage_t)) != HAL_OK) {
-		// Handle error
-		Error_Handler();
+	
+	HAL_StatusTypeDef status = MB85rc_Bus_Read(MB85rc_ADDRESS, 0x0000, 
+			(uint8_t*) &eeStorage, sizeof(eeStorage_t));
+	
+	if (status != HAL_OK) {
+		// Turn ON LED to indicate error
+		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+		
+		// Log error but don't crash
+		printf("FRAM Read Error: 0x%02X at tick %lu\r\n", status, HAL_GetTick());
+		
+		// Try recovery
+		HAL_I2C_DeInit(&hi2c1);
+		HAL_Delay(10);
+		MX_I2C1_Init();
+		
+		// Try again
+		status = MB85rc_Bus_Read(MB85rc_ADDRESS, 0x0000, 
+				(uint8_t*) &eeStorage, sizeof(eeStorage_t));
+		if (status == HAL_OK) {
+			printf("FRAM Read Recovered Successfully\r\n");
+			// Turn OFF LED after successful recovery
+			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+		} else {
+			printf("FRAM Read Failed - Using defaults\r\n");
+			// Keep LED ON to indicate persistent error
+			// Initialize with safe defaults
+			eeStorage.magic_number = 0; // Invalid magic number
+			eeStorage.saved_locked_heading = 0.0f;
+			eeStorage.heading_lock_was_active = 0;
+		}
 	}
-	if (eeStorage.magic_number == EE_MAGIC_NUMBER
+	
+	if (status == HAL_OK && eeStorage.magic_number == EE_MAGIC_NUMBER
 			&& eeStorage.heading_lock_was_active) {
 		locked_heading = eeStorage.saved_locked_heading;
 		result = true;
 	}
+	
 	osMutexRelease(I2C1MutexHandle);
 	return result;
 }
@@ -798,7 +894,8 @@ ch7_position_t get_channel7_position(void) {
  * @brief  The application entry point.
  * @retval int
  */
-int main(void) {
+int main(void)
+{
 
 	/* USER CODE BEGIN 1 */
 
@@ -828,6 +925,7 @@ int main(void) {
 	MX_TIM1_Init();
 	MX_TIM3_Init();
 	MX_IWDG_Init();
+	MX_USART1_UART_Init();
 	/* USER CODE BEGIN 2 */
 	HAL_UART_Receive_DMA(&huart2, sbus_rx_buffer, SBUS_FRAME_SIZE);
 
@@ -840,14 +938,15 @@ int main(void) {
 	char i2c_devices[128];
 	//  char display_str[48];
 
-	// Set PC13 high to turn the onboard LED on
-	//HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+	// Turn ON LED during initialization (PC13 is active LOW)
+	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
 
 	HAL_Delay(BNO085_BOOT_DELAY_MS);
 
 	// Set PC13 high to turn the onboard LED off
 	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
 
+	printf("Start I2C BUS Scan\r\n");
 	i2c_bus_scan(i2c_devices, sizeof(i2c_devices)); // Scan and store result
 
 	uint8_t chip_id = bno085_read_chip_id();
@@ -856,43 +955,52 @@ int main(void) {
 		Error_Handler();
 	}
 
+	printf("About to setup BNO085 Compass\r\n");
 	bno085_setup();
 	//HAL_Delay(100); // Give BNO085 time to boot
 	sh2_clearTare(); // Now device uses absolute/magnetic north as reference
+	printf("BNO085 Compass setup successful\r\n");
 
+	printf("About to initialize SSD1306 LCD\r\n");
 	// Init lcd using one of the stm32HAL i2c typedefs
 	if (ssd1306_Init(&hi2c1) != 0) {
+		printf("Unable to initialize SSD1306 LCD\r\n");
 		Error_Handler();
 	}
+	printf("SSD1306 Initialized\r\n");
 
 	// Initialize the MB85RC256V EEPROM with the I2C handle
+	printf("About to initialize MB85RC256V EEPROM\r\n");
 	MB85rc_Init(&hi2c1);
 	if (HAL_I2C_IsDeviceReady(&hi2c1, MB85rc_ADDRESS, 3, 100) != HAL_OK) {
-	    // Device not ready, handle error
-	    Error_Handler();
+		printf("Unable to initialize MB85RC256V EEPROM\r\n");
+		// Device not ready, handle error
+		Error_Handler();
 	} else {
-	    // FRAM is ready - display status information
-	    ssd1306_Fill(Black);
-	    ssd1306_SetCursor(1, 0);
-	    ssd1306_WriteString("FRAM MB85RC256V", Font_7x10, White);
+		printf("MB85RC256V EEPROM Device Ready\r\n");
+		// FRAM is ready - display status information
+		ssd1306_Fill(Black);
+		ssd1306_SetCursor(1, 0);
+		ssd1306_WriteString("FRAM MB85RC256V", Font_7x10, White);
 
-	    // Display FRAM address
-	    char fram_info[32];
-	    snprintf(fram_info, sizeof(fram_info), "Addr: 0x%02X", MB85rc_ADDRESS);
-	    ssd1306_SetCursor(1, 12);
-	    ssd1306_WriteString(fram_info, Font_7x10, White);
+		// Display FRAM address
+		char fram_info[32];
+		snprintf(fram_info, sizeof(fram_info), "Addr: 0x%02X", MB85rc_ADDRESS);
+		ssd1306_SetCursor(1, 12);
+		ssd1306_WriteString(fram_info, Font_7x10, White);
+		printf("FRAM MB85RC256V initialized: %s, Status: OK\r\n", fram_info);
 
-	    // Display FRAM size (32KB for MB85RC256V)
-	    ssd1306_SetCursor(1, 24);
-	    ssd1306_WriteString("Size: 32KB", Font_7x10, White);
+		// Display FRAM size (32KB for MB85RC256V)
+		ssd1306_SetCursor(1, 24);
+		ssd1306_WriteString("Size: 32KB", Font_7x10, White);
 
-	    // Display initialization status
-	    ssd1306_SetCursor(1, 36);
-	    ssd1306_WriteString("Status: OK", Font_7x10, White);
+		// Display initialization status
+		ssd1306_SetCursor(1, 36);
+		ssd1306_WriteString("Status: OK", Font_7x10, White);
 
-	    ssd1306_UpdateScreen(&hi2c1);
-	    HAL_IWDG_Refresh(&hiwdg);
-	    HAL_Delay(2000); // Show FRAM info for 2 seconds
+		ssd1306_UpdateScreen(&hi2c1);
+		HAL_IWDG_Refresh(&hiwdg);
+		HAL_Delay(2000); // Show FRAM info for 2 seconds
 	}
 
 
@@ -907,8 +1015,10 @@ int main(void) {
 	ssd1306_WriteString(APP_VERSION, Font_7x10, White);
 	ssd1306_SetCursor(1, 12);
 	if (i2c_devices[0] == '\0') {
+		printf("No I2C devices found\r\n");
 		ssd1306_WriteString("No I2C found", Font_7x10, White);
 	} else {
+		printf("I2C devices found: %s\r\n", i2c_devices);
 		ssd1306_WriteString("I2C:", Font_7x10, White);
 		ssd1306_SetCursor(1, 24);
 		ssd1306_WriteString(i2c_devices, Font_7x10, White);
@@ -920,6 +1030,10 @@ int main(void) {
 	HAL_IWDG_Refresh(&hiwdg); // Refresh watchdog
 	// Delay to see I2C info
 	HAL_Delay(2000);
+	
+	// Turn OFF LED after successful initialization (PC13 is active LOW)
+	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+	printf("System initialization completed - LED turned OFF\r\n");
 	/* USER CODE END 2 */
 
 	/* Init scheduler */
@@ -961,20 +1075,16 @@ int main(void) {
 
 	/* Create the thread(s) */
 	/* creation of defaultTask */
-	defaultTaskHandle = osThreadNew(StartDefaultTask, NULL,
-			&defaultTask_attributes);
+	defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
 	/* creation of CompassTask */
-	CompassTaskHandle = osThreadNew(StartCompassTask, NULL,
-			&CompassTask_attributes);
+	CompassTaskHandle = osThreadNew(StartCompassTask, NULL, &CompassTask_attributes);
 
 	/* creation of DisplayTask */
-	DisplayTaskHandle = osThreadNew(StartDisplayTask, NULL,
-			&DisplayTask_attributes);
+	DisplayTaskHandle = osThreadNew(StartDisplayTask, NULL, &DisplayTask_attributes);
 
 	/* creation of EncoderTask */
-	EncoderTaskHandle = osThreadNew(StartEncoderTask, NULL,
-			&EncoderTask_attributes);
+	EncoderTaskHandle = osThreadNew(StartEncoderTask, NULL, &EncoderTask_attributes);
 
 	/* USER CODE BEGIN RTOS_THREADS */
 	/* add threads, ... */
@@ -1004,9 +1114,10 @@ int main(void) {
  * @brief System Clock Configuration
  * @retval None
  */
-void SystemClock_Config(void) {
-	RCC_OscInitTypeDef RCC_OscInitStruct = { 0 };
-	RCC_ClkInitTypeDef RCC_ClkInitStruct = { 0 };
+void SystemClock_Config(void)
+{
+	RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+	RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
 	/** Configure the main internal regulator output voltage
 	 */
@@ -1016,8 +1127,7 @@ void SystemClock_Config(void) {
 	/** Initializes the RCC Oscillators according to the specified parameters
 	 * in the RCC_OscInitTypeDef structure.
 	 */
-	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI
-			| RCC_OSCILLATORTYPE_HSE;
+	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI|RCC_OSCILLATORTYPE_HSE;
 	RCC_OscInitStruct.HSEState = RCC_HSE_ON;
 	RCC_OscInitStruct.LSIState = RCC_LSI_ON;
 	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
@@ -1026,20 +1136,22 @@ void SystemClock_Config(void) {
 	RCC_OscInitStruct.PLL.PLLN = 400;
 	RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
 	RCC_OscInitStruct.PLL.PLLQ = 4;
-	if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
+	if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+	{
 		Error_Handler();
 	}
 
 	/** Initializes the CPU, AHB and APB buses clocks
 	 */
-	RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK
-			| RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+	RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+			|RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
 	RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
 	RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV2;
 	RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
 	RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-	if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK) {
+	if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
+	{
 		Error_Handler();
 	}
 }
@@ -1049,7 +1161,8 @@ void SystemClock_Config(void) {
  * @param None
  * @retval None
  */
-static void MX_I2C1_Init(void) {
+static void MX_I2C1_Init(void)
+{
 
 	/* USER CODE BEGIN I2C1_Init 0 */
 
@@ -1067,7 +1180,8 @@ static void MX_I2C1_Init(void) {
 	hi2c1.Init.OwnAddress2 = 0;
 	hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
 	hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-	if (HAL_I2C_Init(&hi2c1) != HAL_OK) {
+	if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+	{
 		Error_Handler();
 	}
 	/* USER CODE BEGIN I2C1_Init 2 */
@@ -1081,7 +1195,8 @@ static void MX_I2C1_Init(void) {
  * @param None
  * @retval None
  */
-static void MX_IWDG_Init(void) {
+static void MX_IWDG_Init(void)
+{
 
 	/* USER CODE BEGIN IWDG_Init 0 */
 
@@ -1093,7 +1208,8 @@ static void MX_IWDG_Init(void) {
 	hiwdg.Instance = IWDG;
 	hiwdg.Init.Prescaler = IWDG_PRESCALER_64;
 	hiwdg.Init.Reload = 3125;
-	if (HAL_IWDG_Init(&hiwdg) != HAL_OK) {
+	if (HAL_IWDG_Init(&hiwdg) != HAL_OK)
+	{
 		Error_Handler();
 	}
 	/* USER CODE BEGIN IWDG_Init 2 */
@@ -1107,15 +1223,16 @@ static void MX_IWDG_Init(void) {
  * @param None
  * @retval None
  */
-static void MX_TIM1_Init(void) {
+static void MX_TIM1_Init(void)
+{
 
 	/* USER CODE BEGIN TIM1_Init 0 */
 
 	/* USER CODE END TIM1_Init 0 */
 
-	TIM_MasterConfigTypeDef sMasterConfig = { 0 };
-	TIM_OC_InitTypeDef sConfigOC = { 0 };
-	TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = { 0 };
+	TIM_MasterConfigTypeDef sMasterConfig = {0};
+	TIM_OC_InitTypeDef sConfigOC = {0};
+	TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = {0};
 
 	/* USER CODE BEGIN TIM1_Init 1 */
 
@@ -1127,13 +1244,14 @@ static void MX_TIM1_Init(void) {
 	htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
 	htim1.Init.RepetitionCounter = 0;
 	htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-	if (HAL_TIM_PWM_Init(&htim1) != HAL_OK) {
+	if (HAL_TIM_PWM_Init(&htim1) != HAL_OK)
+	{
 		Error_Handler();
 	}
 	sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
 	sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-	if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig)
-			!= HAL_OK) {
+	if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
+	{
 		Error_Handler();
 	}
 	sConfigOC.OCMode = TIM_OCMODE_PWM1;
@@ -1143,16 +1261,16 @@ static void MX_TIM1_Init(void) {
 	sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
 	sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
 	sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
-	if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1)
-			!= HAL_OK) {
+	if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+	{
 		Error_Handler();
 	}
-	if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2)
-			!= HAL_OK) {
+	if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+	{
 		Error_Handler();
 	}
-	if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4)
-			!= HAL_OK) {
+	if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
+	{
 		Error_Handler();
 	}
 	sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
@@ -1162,8 +1280,8 @@ static void MX_TIM1_Init(void) {
 	sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
 	sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
 	sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
-	if (HAL_TIMEx_ConfigBreakDeadTime(&htim1, &sBreakDeadTimeConfig)
-			!= HAL_OK) {
+	if (HAL_TIMEx_ConfigBreakDeadTime(&htim1, &sBreakDeadTimeConfig) != HAL_OK)
+	{
 		Error_Handler();
 	}
 	/* USER CODE BEGIN TIM1_Init 2 */
@@ -1178,14 +1296,15 @@ static void MX_TIM1_Init(void) {
  * @param None
  * @retval None
  */
-static void MX_TIM3_Init(void) {
+static void MX_TIM3_Init(void)
+{
 
 	/* USER CODE BEGIN TIM3_Init 0 */
 
 	/* USER CODE END TIM3_Init 0 */
 
-	TIM_MasterConfigTypeDef sMasterConfig = { 0 };
-	TIM_OC_InitTypeDef sConfigOC = { 0 };
+	TIM_MasterConfigTypeDef sMasterConfig = {0};
+	TIM_OC_InitTypeDef sConfigOC = {0};
 
 	/* USER CODE BEGIN TIM3_Init 1 */
 
@@ -1196,21 +1315,22 @@ static void MX_TIM3_Init(void) {
 	htim3.Init.Period = 24;
 	htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
 	htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-	if (HAL_TIM_PWM_Init(&htim3) != HAL_OK) {
+	if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
+	{
 		Error_Handler();
 	}
 	sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
 	sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-	if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig)
-			!= HAL_OK) {
+	if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+	{
 		Error_Handler();
 	}
 	sConfigOC.OCMode = TIM_OCMODE_PWM1;
 	sConfigOC.Pulse = 0;
 	sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
 	sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-	if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_2)
-			!= HAL_OK) {
+	if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+	{
 		Error_Handler();
 	}
 	/* USER CODE BEGIN TIM3_Init 2 */
@@ -1221,11 +1341,45 @@ static void MX_TIM3_Init(void) {
 }
 
 /**
+ * @brief USART1 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_USART1_UART_Init(void)
+{
+
+	/* USER CODE BEGIN USART1_Init 0 */
+
+	/* USER CODE END USART1_Init 0 */
+
+	/* USER CODE BEGIN USART1_Init 1 */
+
+	/* USER CODE END USART1_Init 1 */
+	huart1.Instance = USART1;
+	huart1.Init.BaudRate = 115200;
+	huart1.Init.WordLength = UART_WORDLENGTH_8B;
+	huart1.Init.StopBits = UART_STOPBITS_1;
+	huart1.Init.Parity = UART_PARITY_NONE;
+	huart1.Init.Mode = UART_MODE_TX;
+	huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+	if (HAL_UART_Init(&huart1) != HAL_OK)
+	{
+		Error_Handler();
+	}
+	/* USER CODE BEGIN USART1_Init 2 */
+
+	/* USER CODE END USART1_Init 2 */
+
+}
+
+/**
  * @brief USART2 Initialization Function
  * @param None
  * @retval None
  */
-static void MX_USART2_UART_Init(void) {
+static void MX_USART2_UART_Init(void)
+{
 
 	/* USER CODE BEGIN USART2_Init 0 */
 
@@ -1242,7 +1396,8 @@ static void MX_USART2_UART_Init(void) {
 	huart2.Init.Mode = UART_MODE_RX;
 	huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
 	huart2.Init.OverSampling = UART_OVERSAMPLING_16;
-	if (HAL_UART_Init(&huart2) != HAL_OK) {
+	if (HAL_UART_Init(&huart2) != HAL_OK)
+	{
 		Error_Handler();
 	}
 	/* USER CODE BEGIN USART2_Init 2 */
@@ -1254,7 +1409,8 @@ static void MX_USART2_UART_Init(void) {
 /**
  * Enable DMA controller clock
  */
-static void MX_DMA_Init(void) {
+static void MX_DMA_Init(void)
+{
 
 	/* DMA controller clock enable */
 	__HAL_RCC_DMA1_CLK_ENABLE();
@@ -1271,8 +1427,9 @@ static void MX_DMA_Init(void) {
  * @param None
  * @retval None
  */
-static void MX_GPIO_Init(void) {
-	GPIO_InitTypeDef GPIO_InitStruct = { 0 };
+static void MX_GPIO_Init(void)
+{
+	GPIO_InitTypeDef GPIO_InitStruct = {0};
 	/* USER CODE BEGIN MX_GPIO_Init_1 */
 
 	/* USER CODE END MX_GPIO_Init_1 */
@@ -1287,14 +1444,11 @@ static void MX_GPIO_Init(void) {
 	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
 
 	/*Configure GPIO pin Output Level */
-	HAL_GPIO_WritePin(GPIOA,
-	Motor_1A_IN1_Pin | Motor_1A_IN2_Pin | Motor_1B_IN2_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOA, Motor_1A_IN1_Pin|Motor_1A_IN2_Pin, GPIO_PIN_RESET);
 
 	/*Configure GPIO pin Output Level */
-	HAL_GPIO_WritePin(GPIOB,
-			Motor_2A_IN1_Pin | Motor_2A_IN2_Pin | TB6612__1_STBY_Pin
-					| TB6612__2_STBY_Pin | Motor_2B_IN1_Pin | Motor_2B_IN2_Pin
-					| Motor_1B_IN1_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOB, Motor_2A_IN1_Pin|Motor_2A_IN2_Pin|Motor_1B_IN2_Pin|TB6612__1_STBY_Pin
+			|TB6612__2_STBY_Pin|Motor_2B_IN1_Pin|Motor_2B_IN2_Pin|Motor_1B_IN1_Pin, GPIO_PIN_RESET);
 
 	/*Configure GPIO pin : PC13 */
 	GPIO_InitStruct.Pin = GPIO_PIN_13;
@@ -1303,9 +1457,8 @@ static void MX_GPIO_Init(void) {
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
 	HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-	/*Configure GPIO pins : Motor_1A_IN1_Pin Motor_1A_IN2_Pin Motor_1B_IN2_Pin */
-	GPIO_InitStruct.Pin =
-	Motor_1A_IN1_Pin | Motor_1A_IN2_Pin | Motor_1B_IN2_Pin;
+	/*Configure GPIO pins : Motor_1A_IN1_Pin Motor_1A_IN2_Pin */
+	GPIO_InitStruct.Pin = Motor_1A_IN1_Pin|Motor_1A_IN2_Pin;
 	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -1329,11 +1482,10 @@ static void MX_GPIO_Init(void) {
 	GPIO_InitStruct.Pull = GPIO_PULLUP;
 	HAL_GPIO_Init(INT_for_SW___SNP00128_GPIO_Port, &GPIO_InitStruct);
 
-	/*Configure GPIO pins : Motor_2A_IN1_Pin Motor_2A_IN2_Pin TB6612__1_STBY_Pin TB6612__2_STBY_Pin
-	 Motor_2B_IN1_Pin Motor_2B_IN2_Pin Motor_1B_IN1_Pin */
-	GPIO_InitStruct.Pin = Motor_2A_IN1_Pin | Motor_2A_IN2_Pin
-			| TB6612__1_STBY_Pin | TB6612__2_STBY_Pin | Motor_2B_IN1_Pin
-			| Motor_2B_IN2_Pin | Motor_1B_IN1_Pin;
+	/*Configure GPIO pins : Motor_2A_IN1_Pin Motor_2A_IN2_Pin Motor_1B_IN2_Pin TB6612__1_STBY_Pin
+                           TB6612__2_STBY_Pin Motor_2B_IN1_Pin Motor_2B_IN2_Pin Motor_1B_IN1_Pin */
+	GPIO_InitStruct.Pin = Motor_2A_IN1_Pin|Motor_2A_IN2_Pin|Motor_1B_IN2_Pin|TB6612__1_STBY_Pin
+			|TB6612__2_STBY_Pin|Motor_2B_IN1_Pin|Motor_2B_IN2_Pin|Motor_1B_IN1_Pin;
 	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -1384,11 +1536,11 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
 	if (GPIO_Pin == ENC_SW_Pin) {
 		GPIO_PinState clk_state = HAL_GPIO_ReadPin(ENC_CLK_GPIO_Port,
-		ENC_CLK_Pin);
+				ENC_CLK_Pin);
 		GPIO_PinState dt_state = HAL_GPIO_ReadPin(ENC_DT_GPIO_Port,
-		ENC_DT_Pin);
+				ENC_DT_Pin);
 		GPIO_PinState sw_state = HAL_GPIO_ReadPin(ENC_SW_GPIO_Port,
-		ENC_SW_Pin);
+				ENC_SW_Pin);
 		// Only count if button is actually pressed (logic low) and both CLK and DT are high
 		// Note: When turn rotary knob left/right, SW pin is always pulled low together with CLK and DT pins.
 		if (sw_state == GPIO_PIN_RESET) {
@@ -1423,8 +1575,8 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 				int byte_idx = 1 + (ch * 11) / 8;
 				int bit_idx = (ch * 11) % 8;
 				uint16_t value = (sbus_rx_buffer[byte_idx]
-						| (sbus_rx_buffer[byte_idx + 1] << 8)
-						| (sbus_rx_buffer[byte_idx + 2] << 16));
+												 | (sbus_rx_buffer[byte_idx + 1] << 8)
+												 | (sbus_rx_buffer[byte_idx + 2] << 16));
 				value = (value >> bit_idx) & 0x07FF;
 
 				// Additional range validation
@@ -1441,8 +1593,8 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
 	if (huart->Instance == USART2) {
-		// Indicate error visually
-		HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+		// Turn ON LED to indicate SBUS error
+		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
 
 		// Mark SBUS as invalid on UART error
 		sbus_signal_valid = 0;
@@ -1470,11 +1622,13 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
  * @retval None
  */
 /* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void *argument) {
+void StartDefaultTask(void *argument)
+{
 	/* USER CODE BEGIN 5 */
 	static ch7_position_t last_ch7_position = CH7_POSITION_UNKNOWN;
 	static uint32_t ch7_stable_time = 0;
 	const uint32_t CH7_DEBOUNCE_MS = 100; // Debounce time for channel 7
+	static uint8_t sbus_was_in_error = 0; // Track SBUS error state
 
 	// --- SBUS recovery flag ---
 	extern volatile uint8_t sbus_recovery_requested; // Declare if not already global
@@ -1506,6 +1660,19 @@ void StartDefaultTask(void *argument) {
 
 		// Check SBUS signal validity
 		sbus_valid = is_sbus_signal_valid();
+		
+		// Handle SBUS recovery LED indication
+		if (sbus_valid && sbus_was_in_error) {
+			// SBUS recovered - turn OFF LED
+			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+			printf("SBUS recovered - LED turned OFF\r\n");
+			sbus_was_in_error = 0;
+		} else if (!sbus_valid && !sbus_was_in_error) {
+			// SBUS lost - turn ON LED
+			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+			printf("SBUS lost - LED turned ON\r\n");
+			sbus_was_in_error = 1;
+		}
 
 		// Get current compass heading
 		osMutexAcquire(CompassMutexHandle, osWaitForever);
@@ -1611,8 +1778,8 @@ void StartDefaultTask(void *argument) {
 				sbus_was_lost = 0;
 				heading_lock_was_enabled = 0;
 			} else if (state == STATE_RUNNING && mode == MODE_MOVEMENT_HL) { // UPDATED
-			// Enable heading lock when starting movement mode with heading lock
-			// Use current compass heading (function will convert to robot front)
+				// Enable heading lock when starting movement mode with heading lock
+				// Use current compass heading (function will convert to robot front)
 				set_heading_lock(current_compass_heading);
 				// Reset recovery state for new session
 				sbus_was_lost = 0;
@@ -1717,7 +1884,8 @@ void StartDefaultTask(void *argument) {
  * @retval None
  */
 /* USER CODE END Header_StartCompassTask */
-void StartCompassTask(void *argument) {
+void StartCompassTask(void *argument)
+{
 	/* USER CODE BEGIN StartCompassTask */
 	/* Infinite loop */
 	for (;;) {
@@ -1737,7 +1905,8 @@ void StartCompassTask(void *argument) {
  * @retval None
  */
 /* USER CODE END Header_StartDisplayTask */
-void StartDisplayTask(void *argument) {
+void StartDisplayTask(void *argument)
+{
 	/* USER CODE BEGIN StartDisplayTask */
 	char display_str[48];
 	const char *mode_names[] = { "SENSOR", "MOVE", "MOVE_HL" }; // UPDATED NAMES
@@ -1866,14 +2035,14 @@ void StartDisplayTask(void *argument) {
 			ssd1306_SetCursor(1, 36);
 			ssd1306_WriteString(display_str, Font_7x10, White);
 
-		    // Line 5: FRAM status
-		    if (HAL_I2C_IsDeviceReady(&hi2c1, MB85rc_ADDRESS, 1, 50) == HAL_OK) {
-		        snprintf(display_str, sizeof(display_str), "FRAM: OK");
-		    } else {
-		        snprintf(display_str, sizeof(display_str), "FRAM: ERR");
-		    }
-		    ssd1306_SetCursor(1, 48);
-		    ssd1306_WriteString(display_str, Font_7x10, White);
+			// Line 5: FRAM status
+			if (HAL_I2C_IsDeviceReady(&hi2c1, MB85rc_ADDRESS, 1, 50) == HAL_OK) {
+				snprintf(display_str, sizeof(display_str), "FRAM: OK");
+			} else {
+				snprintf(display_str, sizeof(display_str), "FRAM: ERR");
+			}
+			ssd1306_SetCursor(1, 48);
+			ssd1306_WriteString(display_str, Font_7x10, White);
 			break;
 
 		case MODE_MOVEMENT:        // UPDATED - was MODE_MOVEMENT_SIMULATOR
@@ -1963,7 +2132,8 @@ void StartDisplayTask(void *argument) {
  * @retval None
  */
 /* USER CODE END Header_StartEncoderTask */
-void StartEncoderTask(void *argument) {
+void StartEncoderTask(void *argument)
+{
 	/* USER CODE BEGIN StartEncoderTask */
 	int32_t last_count = 0;
 	robot_mode_t temp_mode = MODE_DISPLAY_SENSORS;
@@ -2015,8 +2185,8 @@ void StartEncoderTask(void *argument) {
 					selected_mode = temp_mode;  // Keep them in sync
 					mode_change_request = 1;
 				} else if (current == MODE_MOVEMENT // UPDATED
-				|| current == MODE_MOVEMENT_HL) { // UPDATED
-				// Start movement
+						|| current == MODE_MOVEMENT_HL) { // UPDATED
+					// Start movement
 					robot_state = STATE_RUNNING;
 					state_toggle_request = 1;
 				}
@@ -2041,11 +2211,13 @@ void StartEncoderTask(void *argument) {
  * @param  htim : TIM handle
  * @retval None
  */
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
 	/* USER CODE BEGIN Callback 0 */
 
 	/* USER CODE END Callback 0 */
-	if (htim->Instance == TIM2) {
+	if (htim->Instance == TIM2)
+	{
 		HAL_IncTick();
 	}
 	/* USER CODE BEGIN Callback 1 */
@@ -2057,7 +2229,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
  * @brief  This function is executed in case of error occurrence.
  * @retval None
  */
-void Error_Handler(void) {
+void Error_Handler(void)
+{
 	/* USER CODE BEGIN Error_Handler_Debug */
 	/* User can add his own implementation to report the HAL error return state */
 
@@ -2066,30 +2239,65 @@ void Error_Handler(void) {
 	// Enable GPIOC clock if not already enabled
 	__HAL_RCC_GPIOC_CLK_ENABLE();
 
+	// Turn ON internal LED to indicate error (PC13 is active LOW)
+	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+
+    // Print detailed error information
+    printf("\r\n=== ERROR HANDLER ENTERED ===\r\n");
+    printf("System Tick: %lu ms\r\n", HAL_GetTick());
+
+    // Print current task info if FreeRTOS is running
+    if (osKernelGetState() == osKernelRunning) {
+        printf("Current Task: %s\r\n", osThreadGetName(osThreadGetId()));
+        printf("Free Heap: %u bytes\r\n", xPortGetFreeHeapSize());
+    } else {
+        printf("FreeRTOS State: %d\r\n", osKernelGetState());
+    }
+
+    // Print peripheral error states
+    printf("UART1 Error: 0x%08lX\r\n", huart1.ErrorCode);
+    printf("UART2 Error: 0x%08lX\r\n", huart2.ErrorCode);
+    printf("I2C1 Error: 0x%08lX\r\n", hi2c1.ErrorCode);
+
+    // Print SBUS status
+    printf("SBUS Valid: %d\r\n", sbus_signal_valid);
+    printf("SBUS Last Valid: %lu ms ago\r\n", HAL_GetTick() - sbus_last_valid_time);
+
+    // Print current mode and state
+    printf("Current Mode: %d, State: %d\r\n", current_mode, robot_state);
+    printf("Heading Lock: %d\r\n", heading_lock_enabled);
+
+    printf("=== END ERROR INFO ===\r\n\r\n");
+
 	// Flash LED to indicate error, but don't get stuck
 	for (int i = 0; i < 10; i++) {  // Flash 10 times then continue
 		HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
 		HAL_Delay(100);  // Shorter delay
 	}
+	
+	// Keep LED ON after flashing to indicate persistent error state
+	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
 
 	// Instead of infinite loop, try to recover
 	// Reset system if this is a critical error
+	printf("Critical error occurred, resetting system...\r\n");
+    HAL_Delay(100); // Give time for printf to complete
 	NVIC_SystemReset();
 	/* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT
 /**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file: pointer to the source file name
-  * @param  line: assert_param error line source number
-  * @retval None
-  */
+ * @brief  Reports the name of the source file and the source line number
+ *         where the assert_param error has occurred.
+ * @param  file: pointer to the source file name
+ * @param  line: assert_param error line source number
+ * @retval None
+ */
 void assert_failed(uint8_t *file, uint32_t line)
 {
-  /* USER CODE BEGIN 6 */
+	/* USER CODE BEGIN 6 */
 	/* User can add his own implementation to report the file name and line number,
      ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
-  /* USER CODE END 6 */
+	/* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
