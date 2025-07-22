@@ -24,6 +24,10 @@
 ../Middlewares/Third_Party/FreeRTOS/Source/tasks.c:2505:14:uxTaskGetSystemState	32	static
 ../Middlewares/Third_Party/FreeRTOS/Source/tasks.c:2609:12:xTaskCatchUpTicks	24	static,ignoring_inline_asm
 ../Middlewares/Third_Party/FreeRTOS/Source/tasks.c:2707:12:xTaskIncrementTick	32	static,ignoring_inline_asm
+../Middlewares/Third_Party/FreeRTOS/Source/tasks.c:2881:7:vTaskSetApplicationTaskTag	24	static
+../Middlewares/Third_Party/FreeRTOS/Source/tasks.c:2910:21:xTaskGetApplicationTaskTag	24	static
+../Middlewares/Third_Party/FreeRTOS/Source/tasks.c:2934:21:xTaskGetApplicationTaskTagFromISR	40	static,ignoring_inline_asm
+../Middlewares/Third_Party/FreeRTOS/Source/tasks.c:2959:13:xTaskCallApplicationTaskHook	24	static
 ../Middlewares/Third_Party/FreeRTOS/Source/tasks.c:2989:6:vTaskSwitchContext	24	static,ignoring_inline_asm
 ../Middlewares/Third_Party/FreeRTOS/Source/tasks.c:3064:6:vTaskPlaceOnEventList	24	static,ignoring_inline_asm
 ../Middlewares/Third_Party/FreeRTOS/Source/tasks.c:3081:6:vTaskPlaceOnUnorderedEventList	32	static,ignoring_inline_asm
