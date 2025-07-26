@@ -235,6 +235,26 @@ eeStorage_t eeStorage = { 0, 0.0f, 0 }; // magic_number, saved_locked_heading, h
 
 #define EE_MAGIC_NUMBER 0x48454144  // "HEAD" in hex
 
+// Exception tracking variables
+typedef struct {
+    uint32_t exception_count;
+    uint32_t last_exception_time;
+    uint32_t last_exception_lr;    // Link Register
+    uint32_t last_exception_pc;    // Program Counter
+    uint8_t last_exception_type;   // Exception type
+    uint32_t last_i2c_error;      // I2C error code
+    uint32_t i2c_error_count;     // I2C error counter
+} exception_info_t;
+
+volatile exception_info_t exception_info = {0, 0, 0, 0, 0, 0, 0};
+
+#define EXCEPTION_HARDFAULT   1
+#define EXCEPTION_MEMFAULT    2
+#define EXCEPTION_BUSFAULT    3
+#define EXCEPTION_USAGEFAULT  4
+#define EXCEPTION_ASSERT      5
+#define EXCEPTION_I2C_ERROR   6
+
 // SH2 HAL glue
 sh2_Hal_t sh2_hal;
 sh2_SensorConfig_t sh2_config;
@@ -267,6 +287,12 @@ void reset_heading_pid(void);
 float angle_difference(float target, float current);
 uint8_t is_sbus_signal_valid(void);
 void save_heading_lock_to_eeprom(void);
+bool restore_heading_lock_from_eeprom(void);
+void record_exception(uint8_t type, uint32_t lr, uint32_t pc);
+void record_i2c_exception(uint32_t i2c_error_code);
+void record_hardfault(uint32_t *stack_ptr, uint32_t pc, uint32_t lr);
+HAL_StatusTypeDef MB85rc_Bus_Write_Safe(uint16_t DevAddress, uint16_t MemAddress, uint8_t *pData, uint16_t Size);
+HAL_StatusTypeDef MB85rc_Bus_Read_Safe(uint16_t DevAddress, uint16_t MemAddress, uint8_t *pData, uint16_t Size);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -825,41 +851,107 @@ float get_robot_front_heading(void) {
  }
  */
 
+// Exception handling functions
+void record_exception(uint8_t type, uint32_t lr, uint32_t pc) {
+    exception_info.exception_count++;
+    exception_info.last_exception_time = HAL_GetTick();
+    exception_info.last_exception_lr = lr;
+    exception_info.last_exception_pc = pc;
+    exception_info.last_exception_type = type;
+}
+
+void record_i2c_exception(uint32_t i2c_error_code) {
+    exception_info.exception_count++;
+    exception_info.i2c_error_count++;
+    exception_info.last_exception_time = HAL_GetTick();
+    exception_info.last_exception_type = EXCEPTION_I2C_ERROR;
+    exception_info.last_i2c_error = i2c_error_code;
+}
+
+void record_hardfault(uint32_t *stack_ptr, uint32_t pc, uint32_t lr) {
+    record_exception(EXCEPTION_HARDFAULT, lr, pc);
+    
+    // Try to recover instead of hanging
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET); // Turn on LED
+    
+    // Log the fault
+    printf("HardFault: PC=0x%08lX, LR=0x%08lX, Count=%lu\r\n", 
+           pc, lr, exception_info.exception_count);
+    
+    // Reset system after logging
+    HAL_Delay(100);
+    NVIC_SystemReset();
+}
+
+// Enhanced HardFault handler
+void HardFault_Handler(void) {
+    __asm volatile (
+        "tst lr, #4 \n"
+        "ite eq \n"
+        "mrseq r0, msp \n"
+        "mrsne r0, psp \n"
+        "ldr r1, [r0, #24] \n"
+        "mov r2, lr \n"
+        "bl record_hardfault \n"
+        "b . \n"
+    );
+}
+
+// Safe I2C functions with error tracking
+HAL_StatusTypeDef MB85rc_Bus_Write_Safe(uint16_t DevAddress, uint16_t MemAddress, uint8_t *pData, uint16_t Size) {
+    HAL_StatusTypeDef status = MB85rc_Bus_Write(DevAddress, MemAddress, pData, Size);
+    if (status != HAL_OK) {
+        record_i2c_exception(hi2c1.ErrorCode);
+        printf("I2C Write Error: 0x%08lX at tick %lu\r\n", hi2c1.ErrorCode, HAL_GetTick());
+    }
+    return status;
+}
+
+HAL_StatusTypeDef MB85rc_Bus_Read_Safe(uint16_t DevAddress, uint16_t MemAddress, uint8_t *pData, uint16_t Size) {
+    HAL_StatusTypeDef status = MB85rc_Bus_Read(DevAddress, MemAddress, pData, Size);
+    if (status != HAL_OK) {
+        record_i2c_exception(hi2c1.ErrorCode);
+        printf("I2C Read Error: 0x%08lX at tick %lu\r\n", hi2c1.ErrorCode, HAL_GetTick());
+    }
+    return status;
+}
+
 void save_heading_lock_to_eeprom(void) {
 	if (heading_lock_enabled) {
-		osMutexAcquire(I2C1MutexHandle, osWaitForever);
-		eeStorage.magic_number = EE_MAGIC_NUMBER;
-		eeStorage.saved_locked_heading = locked_heading;
-		eeStorage.heading_lock_was_active = 1;
+		if (osMutexAcquire(I2C1MutexHandle, osWaitForever) == osOK) {
+			// Update the structure with current values
+			eeStorage.magic_number = EE_MAGIC_NUMBER;
+			eeStorage.saved_locked_heading = locked_heading;
+			eeStorage.heading_lock_was_active = 1;
 
-		HAL_StatusTypeDef status = MB85rc_Bus_Write(MB85rc_ADDRESS, 0x0000, 
-				(uint8_t*) &eeStorage, sizeof(eeStorage_t));
-
-		if (status != HAL_OK) {
-			// Turn ON LED to indicate error
-			HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
-
-			// Log error but don't crash the system
-			printf("FRAM Write Error: 0x%02X at tick %lu\r\n", status, HAL_GetTick());
-
-			// Try recovery: reinitialize I2C
-			HAL_I2C_DeInit(&hi2c1);
-			HAL_Delay(10);
-			MX_I2C1_Init();
-
-			// Optional: Try one more time
-			status = MB85rc_Bus_Write(MB85rc_ADDRESS, 0x0000, 
+			HAL_StatusTypeDef status = MB85rc_Bus_Write_Safe(MB85rc_ADDRESS, 0x0000, 
 					(uint8_t*) &eeStorage, sizeof(eeStorage_t));
+
 			if (status != HAL_OK) {
-				printf("FRAM Write Failed Again - Continuing without save\r\n");
-				// Keep LED ON to indicate persistent error
-			} else {
-				printf("FRAM Write Recovered Successfully\r\n");
-				// Turn OFF LED after successful recovery
-				HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+				// Turn ON LED to indicate error
+				HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+
+				printf("FRAM Write Failed - Attempting Recovery\r\n");
+
+				// Try recovery: reinitialize I2C
+				HAL_I2C_DeInit(&hi2c1);
+				HAL_Delay(10);
+				MX_I2C1_Init();
+
+				// Optional: Try one more time
+				status = MB85rc_Bus_Write_Safe(MB85rc_ADDRESS, 0x0000, 
+						(uint8_t*) &eeStorage, sizeof(eeStorage_t));
+				if (status != HAL_OK) {
+					printf("FRAM Write Failed Again - Continuing without save\r\n");
+					// Keep LED ON to indicate persistent error
+				} else {
+					printf("FRAM Write Recovered Successfully\r\n");
+					// Turn OFF LED after successful recovery
+					HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+				}
 			}
+			osMutexRelease(I2C1MutexHandle);
 		}
-		osMutexRelease(I2C1MutexHandle);
 	}
 }
 
@@ -867,15 +959,12 @@ bool restore_heading_lock_from_eeprom(void) {
 	bool result = false;
 	osMutexAcquire(I2C1MutexHandle, osWaitForever);
 
-	HAL_StatusTypeDef status = MB85rc_Bus_Read(MB85rc_ADDRESS, 0x0000, 
+	HAL_StatusTypeDef status = MB85rc_Bus_Read_Safe(MB85rc_ADDRESS, 0x0000, 
 			(uint8_t*) &eeStorage, sizeof(eeStorage_t));
 
 	if (status != HAL_OK) {
 		// Turn ON LED to indicate error
 		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
-
-		// Log error but don't crash
-		printf("FRAM Read Error: 0x%02X at tick %lu\r\n", status, HAL_GetTick());
 
 		// Try recovery
 		HAL_I2C_DeInit(&hi2c1);
@@ -883,7 +972,7 @@ bool restore_heading_lock_from_eeprom(void) {
 		MX_I2C1_Init();
 
 		// Try again
-		status = MB85rc_Bus_Read(MB85rc_ADDRESS, 0x0000, 
+		status = MB85rc_Bus_Read_Safe(MB85rc_ADDRESS, 0x0000, 
 				(uint8_t*) &eeStorage, sizeof(eeStorage_t));
 		if (status == HAL_OK) {
 			printf("FRAM Read Recovered Successfully\r\n");
@@ -1700,7 +1789,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 				if (value >= 172 && value <= 1811) {
 					sbus_channels[ch] = value;
 				}
-			}
+			 }
 		} else {
 			// Invalid frame - don't update sbus_signal_valid or channels
 		}
@@ -2176,11 +2265,27 @@ void StartDisplayTask(void *argument)
 			ssd1306_SetCursor(1, 36);
 			ssd1306_WriteString(display_str, Font_7x10, White);
 
-			// Line 5: FRAM status
-			if (HAL_I2C_IsDeviceReady(&hi2c1, MB85rc_ADDRESS, 1, 50) == HAL_OK) {
-				snprintf(display_str, sizeof(display_str), "FRAM: OK");
+			// Line 5: FRAM status with I2C error tracking
+			if (exception_info.i2c_error_count > 0) {
+				uint32_t time_since_i2c_error = HAL_GetTick() - exception_info.last_exception_time;
+				if (time_since_i2c_error < 30000) { // Show I2C error for 30 seconds
+					snprintf(display_str, sizeof(display_str), "I2C Err:0x%lX #%lu", 
+							exception_info.last_i2c_error, exception_info.i2c_error_count);
+				} else {
+					// Check current FRAM status
+					if (HAL_I2C_IsDeviceReady(&hi2c1, MB85rc_ADDRESS, 1, 50) == HAL_OK) {
+						snprintf(display_str, sizeof(display_str), "FRAM: OK");
+					} else {
+						snprintf(display_str, sizeof(display_str), "FRAM: ERR");
+					}
+				}
 			} else {
-				snprintf(display_str, sizeof(display_str), "FRAM: ERR");
+				// No I2C errors - check current FRAM status
+				if (HAL_I2C_IsDeviceReady(&hi2c1, MB85rc_ADDRESS, 1, 50) == HAL_OK) {
+					snprintf(display_str, sizeof(display_str), "FRAM: OK");
+				} else {
+					snprintf(display_str, sizeof(display_str), "FRAM: ERR");
+				}
 			}
 			ssd1306_SetCursor(1, 48);
 			ssd1306_WriteString(display_str, Font_7x10, White);
@@ -2234,6 +2339,45 @@ void StartDisplayTask(void *argument)
 				}
 				ssd1306_SetCursor(1, 36);
 				ssd1306_WriteString(display_str, Font_7x10, White);
+
+				// Line 5: Exception and I2C error information
+				if (exception_info.exception_count > 0) {
+					const char *exc_names[] = {"", "HF", "MF", "BF", "UF", "AS", "I2C"};
+					uint32_t time_since = HAL_GetTick() - exception_info.last_exception_time;
+					
+					if (time_since < 60000) { // Show for 60 seconds
+						if (exception_info.last_exception_type == EXCEPTION_I2C_ERROR) {
+							// Show detailed I2C error
+							snprintf(display_str, sizeof(display_str), 
+									"I2C:0x%lX #%lu %lus", 
+									exception_info.last_i2c_error,
+									exception_info.i2c_error_count,
+									time_since / 1000);
+						} else {
+							// Show other exception types
+							snprintf(display_str, sizeof(display_str), 
+									"EXC:%s #%lu %lus ago", 
+									(exception_info.last_exception_type < 7) ? 
+										exc_names[exception_info.last_exception_type] : "??",
+									exception_info.exception_count,
+									time_since / 1000);
+						}
+					} else {
+						// Show system uptime and heap status
+						snprintf(display_str, sizeof(display_str), 
+								"Up:%lus Heap:%u", 
+								HAL_GetTick() / 1000,
+								xPortGetFreeHeapSize());
+					}
+				} else {
+					// No exceptions - show system uptime and heap status
+					snprintf(display_str, sizeof(display_str), 
+							"Up:%lus Heap:%u", 
+							HAL_GetTick() / 1000,
+							xPortGetFreeHeapSize());
+				}
+				ssd1306_SetCursor(1, 48);
+				ssd1306_WriteString(display_str, Font_7x10, White);
 				
 			} else {
 				// SBUS signal lost - show warning
@@ -2247,6 +2391,27 @@ void StartDisplayTask(void *argument)
 
 				snprintf(display_str, sizeof(display_str), "FOR SAFETY");
 				ssd1306_SetCursor(1, 36);
+				ssd1306_WriteString(display_str, Font_7x10, White);
+
+				// Line 5: Exception information even when SBUS lost
+				if (exception_info.exception_count > 0) {
+					const char *exc_names[] = {"", "HF", "MF", "BF", "UF", "AS", "I2C"};
+					if (exception_info.last_exception_type == EXCEPTION_I2C_ERROR) {
+						snprintf(display_str, sizeof(display_str), 
+								"I2C:0x%lX #%lu", 
+								exception_info.last_i2c_error,
+								exception_info.i2c_error_count);
+					} else {
+						snprintf(display_str, sizeof(display_str), 
+								"EXC:%s #%lu", 
+								(exception_info.last_exception_type < 7) ? 
+									exc_names[exception_info.last_exception_type] : "??",
+								exception_info.exception_count);
+					}
+				} else {
+					snprintf(display_str, sizeof(display_str), "No Exceptions");
+				}
+				ssd1306_SetCursor(1, 48);
 				ssd1306_WriteString(display_str, Font_7x10, White);
 			}
 			break;
