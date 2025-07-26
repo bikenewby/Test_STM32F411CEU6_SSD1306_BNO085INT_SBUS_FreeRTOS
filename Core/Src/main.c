@@ -196,10 +196,10 @@ volatile float locked_heading = 0.0f;
 volatile float heading_error = 0.0f;
 volatile float heading_pid_output = 0.0f;
 
-// PID parameters for heading control
-#define PID_KP 0.7f    // Reduced for smoother response
-#define PID_KI 0.02f   // Much lower to prevent windup
-#define PID_KD 0.1f    // Lower to reduce noise sensitivity
+// PID parameters for heading control - Optimized based on testing
+#define PID_KP 0.35f   // Reduced from 0.7f (based on your optimal -0.5 adjustment)
+#define PID_KI 0.02f   // Keep same - was working well
+#define PID_KD 0.67f   // Optimal base value (was giving best results at 0 adjustment)
 //#define PID_MAX_OUTPUT 15.0f  // Limited to 15% for gentle correction
 #define PID_MAX_OUTPUT 18.0f  // Limited to 18% for gentle correction
 #define PID_INTEGRAL_MAX 20.0f  // Reduced anti-windup limit
@@ -575,6 +575,8 @@ float calculate_heading_pid_simplified(float target_heading,
 	static uint8_t history_idx = 0;
 	static uint32_t last_oscillation_time = 0;
 	static uint32_t overshoot_cooldown = 0;
+	static float derivative_filtered = 0.0f; // Add filtered derivative
+	static float motion_factor = 1.0f; // Motion detection factor
 
 	uint32_t now = HAL_GetTick();
 	if (last_time == 0)
@@ -633,24 +635,49 @@ float calculate_heading_pid_simplified(float target_heading,
 		return output_filtered;
 	}
 
-	// Simplified adaptive gains based on error magnitude only
+	// Motion detection to reduce derivative gain when stationary
+	// Check if robot is actually moving based on joystick inputs
+	extern volatile int16_t joystick_x, joystick_y, joystick_rotation;
+	float total_motion = fabs((float)joystick_x) + fabs((float)joystick_y) + fabs((float)joystick_rotation);
+	
+	// Update motion factor with filtering
+	float target_motion_factor;
+	if (total_motion > 20.0f) {
+		// Robot is moving - use full derivative gain
+		target_motion_factor = 1.0f;
+	} else if (total_motion > 5.0f) {
+		// Gentle movement - moderate derivative gain
+		target_motion_factor = 0.7f;
+	} else {
+		// Stationary - reduce derivative gain to minimize noise amplification
+		target_motion_factor = 0.3f;
+	}
+	
+	// Smooth motion factor changes
+	float motion_alpha = 0.1f; // Slow adaptation
+	motion_factor = motion_alpha * target_motion_factor + (1.0f - motion_alpha) * motion_factor;
+
+	// Optimized adaptive gains based on testing results
 	float kp, ki, kd, max_output;
 	if (fabs(error) > 60.0f) {
-		kp = 1.0f;
+		kp = 0.5f;   // Keep reduced Kp
 		ki = 0.02f;
-		kd = 0.1f;
+		kd = 0.67f;  // Optimal base value from testing
 		max_output = 25.0f;
 	} else if (fabs(error) > 20.0f) {
-		kp = 1.5f;
+		kp = 0.75f;  // Keep reduced Kp
 		ki = 0.03f;
-		kd = 0.15f;
+		kd = 1.0f;   // Optimal scaled value from testing
 		max_output = 20.0f;
 	} else {
-		kp = 2.0f;
+		kp = 1.0f;   // Keep reduced Kp
 		ki = 0.04f;
-		kd = 0.2f;
+		kd = 1.33f;  // Optimal scaled value from testing
 		max_output = 15.0f;
 	}
+
+	// Apply motion factor to reduce noise when stationary
+	kd = kd * motion_factor;
 
 	// Reduce gains if problems detected
 	if (overshoot) {
@@ -666,26 +693,36 @@ float calculate_heading_pid_simplified(float target_heading,
 		max_output *= 0.7f;
 	}
 
-	// Calculate PID terms
+	// Calculate PID terms with derivative filtering
 	float proportional = kp * error;
 
 	integral += error * dt;
 	integral = fmaxf(-50.0f, fminf(50.0f, integral)); // Simple clamping
 	float integral_term = ki * integral;
 
-	float derivative = kd * (error - previous_error) / dt;
+	// Calculate raw derivative
+	float derivative_raw = kd * (error - previous_error) / dt;
+	
+	// Apply low-pass filter to derivative to reduce jerkiness
+	float derivative_alpha = 0.3f; // Filter strength (0.1 = heavy filtering, 0.9 = light filtering)
+	derivative_filtered = derivative_alpha * derivative_raw + (1.0f - derivative_alpha) * derivative_filtered;
 
-	float raw_output = proportional + integral_term + derivative;
+	float raw_output = proportional + integral_term + derivative_filtered;
 
 	// Simple output limiting
 	raw_output = fmaxf(-max_output, fminf(max_output, raw_output));
 
-	// Simple rate limiting
-	float rate_limit = fabs(error) > 30.0f ? 2.0f : 3.0f;
+	// Improved rate limiting for smoother response
+	float rate_limit = fabs(error) > 30.0f ? 1.5f : 2.5f; // Reduced for smoother response
 	if (overshoot)
-		rate_limit *= 0.7f;
+		rate_limit *= 0.6f; // More aggressive rate limiting after overshoot
 	if (oscillation)
-		rate_limit *= 0.5f;
+		rate_limit *= 0.4f; // More aggressive rate limiting during oscillation
+	
+	// Additional smoothing based on derivative magnitude
+	if (fabs(derivative_filtered) > 5.0f) {
+		rate_limit *= 0.7f; // Reduce rate limit when derivative is high
+	}
 
 	float output_diff = raw_output - output_filtered;
 	if (fabs(output_diff) > rate_limit) {
@@ -2197,6 +2234,7 @@ void StartDisplayTask(void *argument)
 				}
 				ssd1306_SetCursor(1, 36);
 				ssd1306_WriteString(display_str, Font_7x10, White);
+				
 			} else {
 				// SBUS signal lost - show warning
 				snprintf(display_str, sizeof(display_str), "SBUS SIGNAL LOST");
