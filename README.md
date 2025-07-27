@@ -77,6 +77,55 @@ This repository contains the firmware and source code for an advanced omniwheels
 
 ---
 
+## MCU Clock Configuration (Optimized for 100MHz)
+
+The system is configured to operate at a **100MHz core frequency**, optimizing all subsystems and peripherals for this speed.
+
+### Clock Source and PLL Settings
+- **Clock Source:** External crystal oscillator (HSE)
+- **HSE Frequency:** 25MHz (STM32F411CEU6 Black Pill standard crystal)
+- **PLL Configuration:**
+  - **PLL Source:** HSE
+  - **PLLM:** 25
+  - **PLLN:** 400
+  - **PLLP:** DIV4
+  - **PLLQ:** 4
+
+These settings yield:
+- **SYSCLK (System Clock):** 100MHz (HSE / PLLM * PLLN / PLLP = 25MHz / 25 * 400 / 4 = 100MHz)
+- **AHB (HCLK):** 50MHz (SYSCLK / 2)
+- **APB1 (PCLK1):** 25MHz (HCLK / 2)
+- **APB2 (PCLK2):** 50MHz (HCLK / 1)
+
+### Configuration Code Reference
+```c
+RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+RCC_OscInitStruct.PLL.PLLM = 25;
+RCC_OscInitStruct.PLL.PLLN = 400;
+RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
+RCC_OscInitStruct.PLL.PLLQ = 4;
+// SYSCLK = (HSE_VALUE / PLLM) * PLLN / PLLP = (25MHz / 25) * 400 / 4 = 100MHz
+
+RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV2;    // HCLK = SYSCLK / 2 = 50MHz
+RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;     // PCLK1 = HCLK / 2 = 25MHz
+RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;     // PCLK2 = HCLK / 1 = 50MHz
+```
+
+### Optimization
+- All main peripherals, tasks, and communication interfaces are configured for reliable operation at 100MHz core frequency.
+- Flash latency and wait states are automatically set for safe access at this frequency.
+- AHB bus operates at 50MHz, providing efficient memory and peripheral access.
+
+### Notes
+- The STM32F411CEU6 supports up to 100MHz system clock (see STM32 device datasheet).
+- The Black Pill development board uses a 25MHz external crystal oscillator.
+- If using different external crystals or changing PLL settings, ensure all timings and peripheral clock dividers are adjusted accordingly.
+- For further details, see clock setup code in `Core/Src/main.c` and `system_stm32f4xx.c`.
+
+---
+
 ## Key Parameters and PID Tuning
 
 ### PID Controller for Heading Lock
