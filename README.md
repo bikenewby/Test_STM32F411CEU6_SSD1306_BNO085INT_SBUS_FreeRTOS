@@ -81,24 +81,41 @@ This repository contains the firmware and source code for an advanced omniwheels
 
 ### PID Controller for Heading Lock
 
-The robot uses a PID controller to maintain heading during movement (heading lock mode). The PID is adaptive and includes anti-windup, oscillation, and overshoot detection.
+The robot uses a PID controller to maintain heading during movement (heading lock mode). The PID features adaptive gains, anti-windup, oscillation detection, overshoot detection, and rate limiting for smooth motor actuation.
 
 **Default PID Parameters (see `main.c`):**
 ```c
-#define PID_KP 0.7f    // Proportional gain (default, adaptive in code)
-#define PID_KI 0.02f   // Integral gain (low to prevent windup)
-#define PID_KD 0.1f    // Derivative gain (damping, reduces overshoot)
-#define PID_MAX_OUTPUT 18.0f  // Max correction output (%)
-#define PID_INTEGRAL_MAX 20.0f  // Integral anti-windup limit
-#define PID_RATE_LIMIT 2.0f  // Max change per update cycle
+#define PID_KP 0.35f // Proportional gain (reduced for smoother response)
+#define PID_KI 0.02f // Integral gain (lower to prevent windup)
+#define PID_KD 0.67f // Derivative gain (increased for better damping)
+#define PID_MAX_OUTPUT 18.0f // Max correction output (%)
+#define PID_INTEGRAL_MAX 20.0f // Integral anti-windup limit
+#define PID_RATE_LIMIT 2.0f // Max change per update cycle
 ```
-- **KP**: Increase for more aggressive/faster heading correction.
-- **KD**: Increase to improve response to rapid heading changes (e.g., wheel slip at high speed).
-- **KI**: Use with caution; too high can cause instability.
-- **Adaptive Gains:** The code increases gains for small errors and reduces them if oscillation or overshoot is detected.
 
-**Oscillation & Overshoot Detection:**  
-- The PID logic automatically reduces gains if it detects oscillation or overshoot, improving stability.
+**Adaptive Gains Based on Error Magnitude:**
+The PID controller automatically adjusts gains based on heading error size for optimal performance:
+- **Large errors (>60°):** Lower gains (Kp=0.5, Ki=0.02, Kd=0.67) for stability
+- **Medium errors (>20°):** Moderate gains (Kp=0.75, Ki=0.03, Kd=1.0) for balance  
+- **Small errors (≤20°):** Higher gains (Kp=1.0, Ki=0.04, Kd=1.33) for precision
+
+**Oscillation & Overshoot Detection:**
+- **Oscillation Detection:** Monitors error sign changes in recent history; when detected, reduces integral term by 50% and applies gain reduction
+- **Overshoot Detection:** Detects when heading error crosses zero with magnitude >15°; reduces integral term by 30% and applies gain reduction
+- **Automatic Gain Reduction:** When problems detected, proportional gains reduced by 30-50%, integral gains by 50-70%, derivative gains by 20-40%
+
+**Rate Limiting for Smooth Actuation:**
+- PID output changes are limited per update cycle (2%/cycle base rate)
+- Rate limit adapts based on error magnitude and detection status
+- Additional smoothing applied when derivative term is high to prevent jerky movements
+
+**State Reset on Heading Lock Events:**
+- Integral, previous error, and output filter states are reset when heading lock is enabled/disabled
+- Ensures clean startup without accumulated windup or stale derivative terms
+
+**FRAM Persistence:**
+- Heading lock value and activation state are stored in FRAM for recovery after resets or SBUS signal loss
+- Automatic restoration maintains heading lock through power cycles and communication interruptions
 
 ### Other Key Parameters
 
@@ -115,9 +132,10 @@ The robot uses a PID controller to maintain heading during movement (heading loc
 
 The firmware uses the MB85RC256V FRAM module (via I2C1 interface) to **save key data for recovery**, including:
 - **Heading lock value:** The last locked heading is saved so it can be restored after a power cycle or SBUS signal loss.
+- **Heading lock state:** Whether heading lock was active when saved, enabling automatic restoration.
 - **Other persistent settings:** Any additional configuration or calibration data can be stored for robust operation.
 
-This ensures the robot can recover its heading lock and other critical parameters after resets, power loss, or communication failures. The FRAM provides reliable, non-volatile storage with virtually unlimited write endurance compared to traditional EEPROM emulation.
+This ensures the robot can recover its heading lock and other critical parameters after resets, power loss, or communication failures. The FRAM provides reliable, non-volatile storage with virtually unlimited write endurance compared to traditional EEPROM emulation. The system automatically attempts to restore heading lock settings on SBUS signal recovery, maintaining consistent operation through temporary signal interruptions.
 
 ---
 
